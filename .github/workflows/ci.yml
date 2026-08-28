@@ -53,4 +53,3 @@ jobs:
                   assert not any("SUPERPOWERS" in name or "taste-skill" in name or "README_CN" in name for name in names)
 
           print("distribution safety checks passed")
-
