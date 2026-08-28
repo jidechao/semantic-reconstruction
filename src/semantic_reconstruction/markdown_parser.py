@@ -7,7 +7,8 @@ from pathlib import Path
 import hashlib
 import re
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
+from urllib.request import url2pathname
 
 from .exceptions import DocumentParseError
 from .models import Evidence, SourceInfo, source_info_from_text
@@ -18,9 +19,14 @@ _FENCE = re.compile(r"^\s{0,3}(`{3,}|~{3,})\s*(.*)$")
 _TABLE = re.compile(r"^\s*\|.*\|\s*$")
 _HTML_LINE = re.compile(r"^\s*<[^>]+>?\s*$", re.IGNORECASE)
 _CAPTION = re.compile(r"^\s*((?:图|Figure|Fig\.)\s*\d+|图示|图表|架构图|流程图)\s*[:：]\s*(.+)$", re.IGNORECASE)
-_IMAGE_INLINE = re.compile(r"!\[([^\]]*)\]\(\s*([^)\s]+)(?:\s+\"([^\"]*)\")?\s*\)")
+_IMAGE_INLINE = re.compile(
+    r"!\[([^\]]*)\]\(\s*(?:<([^>]*)>|([^)\s]+))(?:\s+\"([^\"]*)\")?\s*\)"
+)
 _IMAGE_REFERENCE = re.compile(r"!\[([^\]]*)\]\[([^\]]+)\]")
-_IMAGE_DEFINITION = re.compile(r"^\s{0,3}\[([^\]]+)\]:\s+(\S+)(?:\s+\"([^\"]*)\")?\s*$")
+_IMAGE_DEFINITION = re.compile(
+    r"^\s{0,3}\[([^\]]+)\]:\s+(?:<([^>]*)>|(\S+))(?:\s+\"([^\"]*)\")?\s*$"
+)
+_WINDOWS_ABSOLUTE = re.compile(r"^[A-Za-z]:[\\/]")
 _ASSET_BLOCK_TYPES = {"image", "figure", "chart_code", "chart_svg"}
 _CHART_LANGUAGES = {"mermaid", "mmd", "svg"}
 _GRAPH_SHAPES = {"circle", "ellipse", "line", "path", "polygon", "polyline", "rect", "text", "tspan", "g", "defs", "marker", "arrow"}
@@ -54,8 +60,40 @@ def _source_type(path: str) -> str:
     return "local"
 
 
+def _local_target(path: str) -> Path:
+    parsed = urlparse(path)
+    if parsed.scheme != "file":
+        return Path(path)
+    decoded = Path(url2pathname(unquote(parsed.path)))
+    if parsed.netloc and parsed.netloc.lower() != "localhost":
+        if decoded.anchor:
+            return Path(f"//{parsed.netloc}") / decoded.relative_to(decoded.anchor)
+        return Path(f"//{parsed.netloc}{decoded}")
+    return decoded
+
+
+def _location_kind(path: str) -> str:
+    if path.startswith("data:"):
+        return "data_uri"
+    parsed = urlparse(path)
+    if parsed.scheme in {"http", "https"}:
+        return "remote_url"
+    if parsed.scheme == "file":
+        return "file_uri"
+    if _WINDOWS_ABSOLUTE.match(path) or Path(path).is_absolute():
+        return "absolute_path"
+    return "relative_path"
+
+
 def _mime_from_path(path: str) -> str:
-    suffix = Path(urlparse(path).path).suffix.lower()
+    parsed = urlparse(path)
+    if parsed.scheme in {"http", "https"}:
+        target = Path(unquote(parsed.path))
+    elif parsed.scheme == "file":
+        target = _local_target(path)
+    else:
+        target = Path(path)
+    suffix = target.suffix.lower()
     return {
         ".png": "image/png",
         ".jpg": "image/jpeg",
@@ -70,6 +108,7 @@ def _asset_metadata(path: str, base_dir: Path) -> dict[str, Any]:
     metadata: dict[str, Any] = {
         "asset_type": "chart" if _mime_from_path(path) == "image/svg+xml" else "image",
         "source_type": _source_type(path),
+        "location_kind": _location_kind(path),
         "path": path if path.startswith("data:") else _safe_asset_display(path),
     }
     if path.startswith("data:"):
@@ -85,7 +124,7 @@ def _asset_metadata(path: str, base_dir: Path) -> dict[str, Any]:
             metadata["sha256"] = ""
         return metadata
     if _source_type(path) == "local":
-        candidate = Path(path)
+        candidate = _local_target(path)
         if not candidate.is_absolute():
             candidate = base_dir / candidate
         try:
@@ -481,14 +520,16 @@ class MarkdownParser:
         for line in lines:
             match = _IMAGE_DEFINITION.match(line)
             if match:
-                result[match.group(1).lower()] = (match.group(2), match.group(3) or "")
+                target = match.group(2) if match.group(2) is not None else match.group(3)
+                result[match.group(1).lower()] = (target, match.group(4) or "")
         return result
 
     @staticmethod
     def _inline_assets(raw: str, definitions: dict[str, tuple[str, str]]) -> list[tuple[str, str, str]]:
         assets: list[tuple[str, str, str]] = []
         for match in _IMAGE_INLINE.finditer(raw):
-            assets.append((match.group(1), match.group(2), match.group(3) or ""))
+            target = match.group(2) if match.group(2) is not None else match.group(3)
+            assets.append((match.group(1), target, match.group(4) or ""))
         for match in _IMAGE_REFERENCE.finditer(raw):
             definition = definitions.get(match.group(2).lower())
             if definition:

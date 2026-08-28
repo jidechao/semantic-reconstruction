@@ -33,6 +33,7 @@ class ReconstructionConfig:
     include_code_blocks: bool = True
     include_image_references: bool = True
     include_chart_blocks: bool = True
+    allow_absolute_image_paths: bool = True
     keep_raw_evidence: bool = True
     llm_batch_size: int = 25
     extra_headers: dict[str, str] = field(default_factory=dict)
@@ -87,6 +88,7 @@ class ReconstructionConfig:
             f"max_retries={self.max_retries!r}, max_document_chars={self.max_document_chars!r}, "
             f"include_code_blocks={self.include_code_blocks!r}, keep_raw_evidence={self.keep_raw_evidence!r}, "
             f"llm_batch_size={self.llm_batch_size!r}, extra_headers={list(self.extra_headers)!r}, "
+            f"allow_absolute_image_paths={self.allow_absolute_image_paths!r}, "
             f"image_understanding={self.image_understanding!r}, vision_api_key=<redacted>, "
             f"vision_base_url={self.vision_base_url!r}, vision_model={self.vision_model!r}, "
             f"vision_timeout_seconds={self.vision_timeout_seconds!r}, vision_max_retries={self.vision_max_retries!r}, "

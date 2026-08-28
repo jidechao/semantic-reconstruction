@@ -25,7 +25,24 @@ def _finding(check: int | str, status: str, message: str) -> dict[str, str]:
 
 
 def validate_knowledge_unit(unit: KnowledgeUnit) -> list[dict[str, str]]:
-    evidence_text = " ".join(item.text for item in unit.evidence)
+    image_unit = unit.generation_mode == "image_evidence"
+    vision_text: list[str] = []
+    for item in unit.evidence:
+        vision = item.metadata.get("vision") if item.block_type == "image" else None
+        if not vision:
+            continue
+        vision_text.extend([
+            str(vision.get("description", "")),
+            str(vision.get("visible_text", "")),
+            str(vision.get("chart_type", "")),
+            str(vision.get("confidence", "")),
+            f"{float(vision.get('confidence', 0.0)):.2f}",
+            " ".join(str(value) for value in vision.get("objects_or_nodes", [])),
+            " ".join(str(value) for value in vision.get("relationships", [])),
+            " ".join(str(value) for value in vision.get("colors_or_legends", [])),
+            " ".join(str(value) for value in vision.get("limitations", [])),
+        ])
+    evidence_text = " ".join([*[item.text for item in unit.evidence], *vision_text])
     combined = " ".join([
         unit.object, *unit.conditions, unit.action_or_conclusion, *unit.exceptions, unit.time_range,
     ])
@@ -36,7 +53,9 @@ def validate_knowledge_unit(unit: KnowledgeUnit) -> list[dict[str, str]]:
     findings.append(_finding(1, "error" if vague else "pass", "业务对象明确。" if not vague else "业务对象仍依赖上下文。"))
 
     condition_evidence_text = " ".join(item.text for item in unit.evidence if item.block_type != "heading")
-    if unit.conditions:
+    if image_unit:
+        findings.append(_finding(2, "pass", "图片证据不推断业务前置条件。"))
+    elif unit.conditions:
         missing = [item for item in unit.conditions if _normalize(item) not in _normalize(structural)]
         findings.append(_finding(2, "error" if missing else "pass", "前置条件与结论共同保留。" if not missing else f"前置条件遗漏：{missing}"))
     elif _CONDITION_HINT.search(condition_evidence_text):
@@ -44,11 +63,16 @@ def validate_knowledge_unit(unit: KnowledgeUnit) -> list[dict[str, str]]:
     else:
         findings.append(_finding(2, "pass", "该知识不需要独立前置条件。"))
 
-    expected_modal = [term for term in MODAL_TERMS if term in evidence_text]
-    missing_modal = [term for term in expected_modal if term not in combined]
-    findings.append(_finding(3, "error" if missing_modal else "pass", "关键逻辑词保持原意。" if not missing_modal else f"关键逻辑词遗漏：{missing_modal}"))
+    if image_unit:
+        findings.append(_finding(3, "pass", "图片可见文字不升级为业务规则。"))
+    else:
+        expected_modal = [term for term in MODAL_TERMS if term in evidence_text]
+        missing_modal = [term for term in expected_modal if term not in combined]
+        findings.append(_finding(3, "error" if missing_modal else "pass", "关键逻辑词保持原意。" if not missing_modal else f"关键逻辑词遗漏：{missing_modal}"))
 
-    if any(_EXCEPTION_HINT.search(item.text) for item in unit.evidence):
+    if image_unit:
+        findings.append(_finding(4, "pass", "图片可见例外文字不升级为业务规则。"))
+    elif any(_EXCEPTION_HINT.search(item.text) for item in unit.evidence):
         missing = [item for item in unit.exceptions if _normalize(item) not in _normalize(structural)]
         # Exceptions were extracted from the same candidate in rule mode; LLM mode is additionally checked against its anchor.
         findings.append(_finding(4, "pass" if unit.exceptions else "error", "一般规则与例外完整绑定。" if unit.exceptions else "证据包含例外语义但重构结果遗漏。"))

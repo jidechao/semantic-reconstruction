@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.2.0 - 2026-08-28
+
+### Added
+
+- Markdown angle-bracket image targets and `location_kind` asset metadata.
+- Relative-path, Windows/POSIX absolute-path, `file:///`, data-URI, and direct HTTP(S) URL image handling.
+- `allow_absolute_image_paths` configuration and `--absolute-image-paths / --no-absolute-image-paths` CLI controls.
+- Standalone image-evidence knowledge units for every parsed image.
+- Always-on diagnostics for missing images, missing `src`, unsupported MIME, excessive size, and path escapes.
+- Vision requests now pass remote URLs directly to OpenAI-compatible multimodal providers without downloading.
+- Markdown report rendering for image sources, visual descriptions, confidence, limitations, and token usage.
+
+### Changed
+
+- Package version upgraded to 1.2.0.
+- Output schema version upgraded to 1.2.
+- Local absolute paths and `file:///` images are allowed by default; setting `allow_absolute_image_paths=False` restores the document-root boundary.
+
 ## 1.1.0 - 2026-08-28
 
 ### Added

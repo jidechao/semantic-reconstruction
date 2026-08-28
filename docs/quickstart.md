@@ -83,7 +83,7 @@ for result in results:
 
 ## 8. 启用图片理解
 
-默认只做离线引用层处理。配置多模态模型后，SDK 会自动理解本地图片和 data URI：
+默认做离线引用层处理并为每张图片生成独立证据单元。配置多模态模型后，SDK 会自动理解相对路径本地图片、本机绝对路径图片、`file:///` 图片、data URI，并把 HTTP(S) URL 直接传给视觉模型：
 
 ```python
 config = ReconstructionConfig(
@@ -95,4 +95,4 @@ config = ReconstructionConfig(
 )
 ```
 
-远程图片只保留 URL 引用，不会被抓取。详见 [图片与图表处理](image-and-chart-processing.md)。
+SDK 自身不会下载远程图片，而是把 HTTP(S) URL 原样传给视觉模型。详见 [图片与图表处理](image-and-chart-processing.md)。

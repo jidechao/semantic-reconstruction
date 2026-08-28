@@ -14,6 +14,7 @@
 - 默认 `rule` 模式完全离线、确定性运行
 - 可选 `hybrid` / `llm` 模式基于 DeepSeek OpenAI-compatible API，并强制越界校验
 - 支持 API key 注入、密钥脱敏、可选多模态图片理解和私有 wheel 分发
+- 支持相对路径、本机绝对路径、`file:///`、data URI 和 HTTP(S) URL 图片证据，并为每张图片生成独立知识单元
 
 ## 安装
 
@@ -27,7 +28,7 @@ python -m venv .venv
 安装私有 wheel：
 
 ```powershell
-.\.venv\Scripts\python.exe -m pip install semantic_reconstruction-1.1.0-py3-none-any.whl
+.\.venv\Scripts\python.exe -m pip install semantic_reconstruction-1.2.0-py3-none-any.whl
 ```
 
 ## 5 分钟集成

@@ -73,6 +73,10 @@ except SemanticReconstructionError:
 
 | code | 含义 |
 |---|---|
-| `image_understanding_skipped` | 远程图片只保留引用，不主动抓取 |
+| `image_asset_missing` | 本地图片或 `file:///` 目标不存在 |
+| `image_src_missing` | HTML 图片缺少 `src` |
+| `image_path_escape` | 相对路径越界，或绝对路径被配置禁止 |
+| `image_mime_unsupported` | 本地/data URI 图片 MIME 不支持 |
+| `image_too_large` | 本地/data URI 图片超过大小限制 |
 | `vision_output_rejected` | 视觉输出未通过结构化、置信度或安全校验 |
 | `vision_provider_error` | 视觉模型调用失败，已回退引用层 |

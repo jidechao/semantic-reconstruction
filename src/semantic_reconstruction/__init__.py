@@ -13,7 +13,7 @@ from .models import Diagnostic, Evidence, KnowledgeUnit, ReconstructionResult, S
 from .sdk import SemanticReconstructor
 from .vision import ImageDescription, ImageRequest, OpenAICompatibleVisionClient, VisionClientProtocol
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 __all__ = [
     "SemanticReconstructor",
     "ReconstructionConfig",

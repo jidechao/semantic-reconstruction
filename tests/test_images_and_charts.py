@@ -2,6 +2,7 @@ import base64
 import json
 from types import SimpleNamespace
 from pathlib import Path
+import uuid
 
 import pytest
 
@@ -12,6 +13,7 @@ from semantic_reconstruction import (
     SemanticReconstructor,
 )
 from semantic_reconstruction.markdown_parser import MarkdownParser
+from semantic_reconstruction.report import render_report
 from semantic_reconstruction.vision import ImageRequest, OpenAICompatibleVisionClient
 
 PNG = base64.b64decode(
@@ -45,6 +47,17 @@ def test_markdown_image_reference_and_definition(tmp_path):
     assert image.metadata["exists"] is True
     assert image.metadata["sha256"]
     assert image.evidence_id.startswith("demo-b")
+
+
+def test_markdown_image_supports_angle_target_with_spaces(tmp_path):
+    write_png(tmp_path / "assets" / "flow chart.png")
+    text = '# 图\n\n![流程图](<assets/flow chart.png> "审批流程")\n'
+    document = MarkdownParser().parse_text(text, source_id="spaces", source_path=str(tmp_path / "demo.md"))
+    images = [item for item in document.evidence if item.block_type == "image"]
+    assert len(images) == 1
+    assert images[0].metadata["path"] == "assets/flow chart.png"
+    assert images[0].metadata["location_kind"] == "relative_path"
+    assert images[0].metadata["exists"] is True
 
 
 def test_markdown_remote_data_and_missing_images():
@@ -143,9 +156,11 @@ class RecordingVisionClient:
     def __init__(self, description: ImageDescription | Exception):
         self.description = description
         self.calls = 0
+        self.requests = []
 
     def describe_image(self, request):
         self.calls += 1
+        self.requests.append(request)
         if isinstance(self.description, Exception):
             raise self.description
         return self.description
@@ -206,17 +221,124 @@ def test_vision_description_is_evidence_and_requires_review(tmp_path):
     assert "base64" not in serialized and "mock-api-key" not in serialized
 
 
-def test_vision_remote_url_is_not_fetched(tmp_path):
+def test_vision_description_is_rendered_in_report(tmp_path):
+    result, _ = vision_setup(tmp_path)
+    report = render_report(result)
+    assert "#### 图片与视觉证据层" in report
+    assert "mock-vision" in report
+    assert "0.90" in report
+    assert "图中显示流程节点。" in report
+    assert "total tokens 12" in report
+
+
+def test_image_unit_numbers_and_condition_words_are_evidence_supported(tmp_path):
+    description = ImageDescription(
+        description="图中显示 3 个节点和 2 条连接。",
+        visible_text="如果输入必须经过 3 层校验，不得跳过根因分析",
+        chart_type="flowchart",
+        objects_or_nodes=["输入", "校验", "输出"],
+        relationships=["输入 -> 校验", "校验 -> 输出"],
+        colors_or_legends=[],
+        limitations=[],
+        confidence=0.9,
+        model="mock-vision",
+        usage={"prompt_tokens": 5, "completion_tokens": 7, "total_tokens": 12},
+    )
+    result, client = vision_setup(tmp_path, description=description)
+    assert client.calls == 1
+    unit = next(item for item in result.units if item.generation_mode == "image_evidence")
+    assert unit.review_status == "pending_business_review"
+    assert not any(finding["check"] == "8" and finding["status"] == "error" for finding in unit.validation_findings)
+    assert not any(finding["check"] == "2" and finding["status"] == "error" for finding in unit.validation_findings)
+    assert not any(finding["check"] == "4" and finding["status"] == "error" for finding in unit.validation_findings)
+
+
+def test_vision_remote_url_is_passed_directly_without_download(tmp_path):
     markdown = tmp_path / "remote.md"
-    markdown.write_text('# 图\n\n如下图。\n\n![远程](https://example.com/image.png)\n', encoding="utf-8")
+    markdown.write_text('# 图\n\n![远程](https://example.com/image.png)\n', encoding="utf-8")
     client = RecordingVisionClient(make_description())
     sdk = SemanticReconstructor(
         ReconstructionConfig(image_understanding="required"),
         vision_client=client,
     )
     result = sdk.reconstruct_markdown(markdown)
+    assert client.calls == 1
+    assert client.requests[0].source_url == "https://example.com/image.png"
+    assert client.requests[0].data == b""
+    assert any(unit.review_status == "pending_business_review" for unit in result.units)
+
+
+def test_remote_vision_failure_falls_back_to_reference_unit(tmp_path):
+    markdown = tmp_path / "remote-failure.md"
+    markdown.write_text('# 图\n\n![远程](https://example.com/image.png)\n', encoding="utf-8")
+    client = RecordingVisionClient(RuntimeError("provider unavailable"))
+    sdk = SemanticReconstructor(
+        ReconstructionConfig(image_understanding="required"),
+        vision_client=client,
+    )
+    result = sdk.reconstruct_markdown(markdown)
+    assert client.calls == 1
+    assert any(item.code == "vision_provider_error" for item in result.diagnostics)
+    assert any(unit.review_status == "pending_business_review" for unit in result.units)
+
+
+def test_absolute_local_image_is_allowed_by_default_and_can_be_disabled(tmp_path):
+    outside = tmp_path.parent / f"semantic-reconstruction-outside-{uuid.uuid4().hex}.png"
+    write_png(outside)
+    try:
+        markdown = tmp_path / "absolute.md"
+        markdown.write_text('# 图\n\n![外部图](' + str(outside).replace('\\', '\\\\') + ')\n', encoding="utf-8")
+        client = RecordingVisionClient(make_description())
+        sdk = SemanticReconstructor(
+            ReconstructionConfig(image_understanding="required"),
+            vision_client=client,
+        )
+        result = sdk.reconstruct_markdown(markdown)
+        assert client.calls == 1
+        assert not any(item.code == "image_path_escape" for item in result.diagnostics)
+
+        client = RecordingVisionClient(make_description())
+        sdk = SemanticReconstructor(
+            ReconstructionConfig(image_understanding="required", allow_absolute_image_paths=False),
+            vision_client=client,
+        )
+        result = sdk.reconstruct_markdown(markdown)
+        assert client.calls == 0
+        assert any(item.code == "image_path_escape" for item in result.diagnostics)
+        assert any(unit.review_status == "blocked" for unit in result.units)
+    finally:
+        outside.unlink(missing_ok=True)
+
+
+def test_file_uri_and_spaced_path_are_resolved(tmp_path):
+    image = tmp_path / "image with spaces.png"
+    write_png(image)
+    markdown = tmp_path / "file-uri.md"
+    markdown.write_text('# 图\n\n![文件URI](' + image.as_uri() + ')\n\n<img src="' + image.as_uri() + '" alt="HTML文件URI">\n', encoding="utf-8")
+    document = MarkdownParser().parse_text(
+        markdown.read_text(encoding="utf-8"), source_id="file-uri", source_path=str(markdown)
+    )
+    images = [item for item in document.evidence if item.block_type == "image"]
+    assert len(images) == 2
+    assert all(item.metadata["location_kind"] == "file_uri" for item in images)
+    assert all(item.metadata["exists"] is True for item in images)
+
+    client = RecordingVisionClient(make_description())
+    sdk = SemanticReconstructor(ReconstructionConfig(image_understanding="required"), vision_client=client)
+    result = sdk.reconstruct_markdown(markdown)
+    assert client.calls == 2
+    assert all(request.data == PNG for request in client.requests)
+
+
+def test_missing_image_has_diagnostic_and_independent_blocked_unit(tmp_path):
+    markdown = tmp_path / "missing.md"
+    markdown.write_text('# 图\n\n![缺失](assets/missing.png)\n', encoding="utf-8")
+    client = RecordingVisionClient(make_description())
+    sdk = SemanticReconstructor(ReconstructionConfig(image_understanding="required"), vision_client=client)
+    result = sdk.reconstruct_markdown(markdown)
     assert client.calls == 0
-    assert any(item.code == "image_understanding_skipped" for item in result.diagnostics)
+    assert any(item.code == "image_asset_missing" for item in result.diagnostics)
+    assert any(unit.review_status == "blocked" and "本地图片不存在" in "；".join(unit.known_gaps) for unit in result.units)
 
 
 def test_vision_rejects_unsupported_mime_size_and_path_escape(tmp_path):
@@ -278,7 +400,11 @@ def test_vision_invalid_low_confidence_failure_and_conflict_fallback(tmp_path):
 
 
 class FakeVisionCompletions:
+    def __init__(self):
+        self.last_kwargs = None
+
     def create(self, **kwargs):
+        self.last_kwargs = kwargs
         payload = {
             "description": "图中显示流程节点。",
             "visible_text": "提交申请",
@@ -324,6 +450,18 @@ def test_openai_compatible_vision_client_parses_structured_output():
     assert description.model == "mock-multimodal"
     assert description.chart_type == "flowchart"
     assert description.usage["total_tokens"] == 12
+    blocks = client._client.chat.completions.last_kwargs["messages"][1]["content"]
+    assert blocks[1]["image_url"]["url"] == request.data_uri
+
+    remote_request = ImageRequest(
+        path="https://example.com/image.png",
+        mime_type="",
+        data=b"",
+        source_url="https://example.com/image.png",
+    )
+    client.describe_image(remote_request)
+    blocks = client._client.chat.completions.last_kwargs["messages"][1]["content"]
+    assert blocks[1]["image_url"]["url"] == "https://example.com/image.png"
 
 
 def test_html_figure_vision_marks_child_image_unit_for_review(tmp_path):

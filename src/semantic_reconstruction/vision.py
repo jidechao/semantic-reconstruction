@@ -21,6 +21,7 @@ class ImageRequest:
     path: str
     mime_type: str
     data: bytes = field(repr=False, compare=False)
+    source_url: str = ""
     alt: str = ""
     title: str = ""
     caption: str = ""
@@ -29,6 +30,8 @@ class ImageRequest:
 
     @property
     def data_uri(self) -> str:
+        if not self.data:
+            return ""
         return "data:" + self.mime_type + ";base64," + base64.b64encode(self.data).decode("ascii")
 
 
@@ -123,7 +126,7 @@ class OpenAICompatibleVisionClient:
         )
 
     def describe_image(self, request: ImageRequest) -> ImageDescription:
-        if request.mime_type not in SUPPORTED_IMAGE_MIME_TYPES:
+        if not request.source_url and request.mime_type not in SUPPORTED_IMAGE_MIME_TYPES:
             raise LLMProviderError(f"不支持的图片 MIME 类型：{request.mime_type}")
         client = self._create_client()
         context = {
@@ -147,7 +150,7 @@ class OpenAICompatibleVisionClient:
                 "role": "user",
                 "content": [
                     {"type": "text", "text": instruction + "\n上下文：" + json.dumps(context, ensure_ascii=False)},
-                    {"type": "image_url", "image_url": {"url": request.data_uri}},
+                    {"type": "image_url", "image_url": {"url": request.source_url or request.data_uri}},
                 ],
             },
         ]

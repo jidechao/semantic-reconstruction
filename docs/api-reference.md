@@ -56,6 +56,7 @@ reconstruct_files(paths) -> list[ReconstructionResult]
 | `include_code_blocks` | `bool` | `True` | 代码块是否作为证据保留 |
 | `include_image_references` | `bool` | `True` | 图片引用是否作为证据保留 |
 | `include_chart_blocks` | `bool` | `True` | Mermaid / SVG 是否作为图表证据保留 |
+| `allow_absolute_image_paths` | `bool` | `True` | 是否允许读取 Markdown 目录外的本机绝对路径和 `file:///` 图片 |
 | `keep_raw_evidence` | `bool` | `True` | 是否保留原始 Markdown 片段 |
 | `llm_batch_size` | `int` | `25` | 每次模型请求最多处理的知识单元数 |
 | `extra_headers` | `dict` | `{}` | 传递给 provider 的额外 header |
@@ -73,13 +74,14 @@ reconstruct_files(paths) -> list[ReconstructionResult]
 - `repr(config)` 永远显示 `api_key=<redacted>` 和 `vision_api_key=<redacted>`
 - SDK 不读取 `.env`
 - 只有 `hybrid/llm` 模式或启用视觉理解时才可能访问网络
-- 视觉理解只读取 Markdown 目录内本地图片和 data URI，不抓取远程图片
+- 相对路径必须落在 Markdown 目录内；本机绝对路径和 `file:///` 默认允许，可通过 `allow_absolute_image_paths=False` 关闭
+- SDK 不下载 HTTP(S) 图片，视觉模型启用时把 URL 直接传给 provider
 
 ## `ReconstructionResult`
 
 | 成员 | 说明 |
 |---|---|
-| `schema_version` | 当前为 `1.0` |
+| `schema_version` | 当前为 `1.2` |
 | `source` | 来源 ID、路径、标题、行数、字符数和 SHA-256 |
 | `units` | `KnowledgeUnit` 列表 |
 | `diagnostics` | 文档级诊断 |

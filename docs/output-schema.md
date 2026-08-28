@@ -1,12 +1,12 @@
 # 输出 Schema
 
-当前 `schema_version` 为 `1.1`。
+当前 `schema_version` 为 `1.2`。
 
 ## 顶层结构
 
 ```json
 {
-  "schema_version": "1.1",
+  "schema_version": "1.2",
   "source": {
     "source_id": "policy",
     "source_path": "docs/policy.md",
@@ -124,6 +124,6 @@
 
 ## 图片与图表 metadata
 
-引用层会输出路径、alt、title、图注、来源类型、本地文件哈希、Mermaid 节点和 SVG 文本。视觉理解成功时，`metadata.vision` 包含结构化描述、confidence 和 token 用量。
+引用层会输出路径、alt、title、图注、来源类型、本地文件哈希、Mermaid 节点和 SVG 文本。每张图片都会生成独立的 `generation_mode="image_evidence"` 知识单元。视觉理解成功时，`metadata.vision` 包含结构化描述、confidence 和 token 用量，并渲染到报告的“图片与视觉证据层”。
 
 输出中不包含图片二进制；data URI payload 会自动替换为 `<omitted>`。

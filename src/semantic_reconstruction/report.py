@@ -50,6 +50,38 @@ def _unit_section(unit: KnowledgeUnit) -> list[str]:
         f"{' > '.join(item.heading_path) or '文档根路径'}｜{item.block_type}：{item.text}"
         for item in unit.evidence
     )
+    evidence_by_id = {item.evidence_id: item for item in unit.evidence}
+    image_items = [item for item in unit.evidence if item.block_type == "image"]
+    if image_items:
+        lines.extend(["", "#### 图片与视觉证据层", ""])
+        for item in image_items:
+            metadata = item.metadata
+            vision = metadata.get("vision")
+            caption_id = str(metadata.get("caption_evidence_id", ""))
+            caption = evidence_by_id.get(caption_id)
+            lines.append(f"##### 图片 `{item.evidence_id}`")
+            lines.extend([
+                f"- 来源：`{_escape(metadata.get('path', '未知来源'))}`",
+                f"- Alt：{_escape(metadata.get('alt') or '待确认')}",
+                f"- Title：{_escape(metadata.get('title') or '待确认')}",
+                f"- 图注：{_escape(caption.text if caption else '待确认')}",
+            ])
+            if not vision:
+                lines.append("- 视觉描述：未生成，图片内容需人工复核。")
+                lines.append("")
+                continue
+            usage = vision.get("usage", {})
+            limitations = vision.get("limitations") or []
+            lines.extend([
+                f"- 视觉模型：`{_escape(vision.get('model', 'unknown'))}`",
+                f"- 图表类型：{_escape(vision.get('chart_type') or '待确认')}",
+                f"- 置信度：{vision.get('confidence', 0)}",
+                f"- 图片描述：{_escape(vision.get('description') or '待确认')}",
+                f"- 可见文字：{_escape(vision.get('visible_text') or '无')}",
+                f"- 限制说明：{_escape('；'.join(str(value) for value in limitations) or '无')}",
+                f"- Token usage：prompt {_escape(usage.get('prompt_tokens', 'N/A'))}；completion {_escape(usage.get('completion_tokens', 'N/A'))}；total {_escape(usage.get('total_tokens', 'N/A'))}.",
+                "",
+            ])
     lines.extend([
         "",
         "#### 重构知识层",

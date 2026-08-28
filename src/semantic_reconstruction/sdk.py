@@ -5,11 +5,12 @@ from pathlib import Path
 from typing import Iterable
 
 from .config import ReconstructionConfig
+from .detector import detect_risk_flags
 from .exceptions import DocumentParseError, DocumentTooLargeError, InvalidConfigurationError
 from .llm_client import ClientProtocol, DeepSeekClient
 from .llm_engine import HybridEngine, LLMEngine
 from .markdown_parser import MarkdownParser, _slug
-from .models import Diagnostic, Evidence, ReconstructionResult
+from .models import Diagnostic, Evidence, KnowledgeUnit, ReconstructionResult
 from .vision import (
     ImageDescription,
     ImageRequest,
@@ -20,8 +21,9 @@ from .vision import (
     validate_description,
 )
 from .pipeline import RuleReconstructor
+from .validator import validate_knowledge_unit
 
-SCHEMA_VERSION = "1.1"
+SCHEMA_VERSION = "1.2"
 
 
 class SemanticReconstructor:
@@ -54,67 +56,173 @@ class SemanticReconstructor:
     def _vision_enabled(self) -> bool:
         return self.config.image_understanding != "off" and self._vision_client is not None
 
-    def _load_image_request(self, evidence: Evidence, source_root) -> ImageRequest | None:
-        metadata = evidence.metadata
-        source_type = metadata.get("source_type")
-        data: bytes | None = None
-        mime = metadata.get("mime_type", "")
-        path = metadata.get("path", "")
-        if source_type == "local":
-            resolved = Path(metadata.get("resolved_path", ""))
-            root = Path(source_root).resolve()
-            try:
-                resolved = resolved.resolve()
-                resolved.relative_to(root)
-            except (OSError, ValueError):
-                raise ValueError(f"本地图片路径越界，拒绝读取：{resolved}")
-            if not resolved.is_file():
-                return None
-            data = resolved.read_bytes()
-        elif source_type == "data":
-            decoded = decode_data_uri(metadata.get("_data_uri", ""))
-            if decoded is None:
-                return None
-            mime, data = decoded
-        else:
-            return None
-        if mime not in SUPPORTED_IMAGE_MIME_TYPES:
-            raise ValueError(f"不支持的图片 MIME 类型：{mime}")
-        if len(data) > self.config.vision_max_image_bytes:
-            raise ValueError(f"图片超过大小限制：{len(data)} > {self.config.vision_max_image_bytes}")
-        caption_id = metadata.get("caption_evidence_id")
-        return ImageRequest(
-            path=path,
-            mime_type=mime,
-            data=data,
-            alt=metadata.get("alt", ""),
-            title=metadata.get("title", ""),
-            caption=caption_id or "",
-            heading_path=evidence.heading_path,
-            evidence_id=evidence.evidence_id,
-        )
+    def _append_image_units(self, parsed, units: list) -> list:
+        image_evidence = [item for item in parsed.evidence if item.block_type == "image"]
+        evidence_index = {item.evidence_id: item for item in parsed.evidence}
+        for image in image_evidence:
+            metadata = image.metadata
+            heading = next((
+                item for item in reversed(parsed.evidence)
+                if item.block_type == "heading" and item.line_end <= image.line_start
+            ), None)
+            caption = evidence_index.get(metadata.get("caption_evidence_id", ""), None)
+            container = evidence_index.get(metadata.get("container_evidence_id", ""), None)
+            bound_evidence = [item for item in [heading, image, caption, container] if item is not None]
+            known_gaps: list[str] = []
+            if metadata.get("missing_src") or metadata.get("source_type") in {"", "unknown"}:
+                known_gaps.append("HTML 图片缺少 src，无法定位图片证据。")
+            if metadata.get("source_type") == "local" and not metadata.get("exists", False):
+                known_gaps.append(f"引用的本地图片不存在：{metadata.get('path', '未知路径')}")
+            if metadata.get("mime_type") not in {"", "image/png", "image/jpeg", "image/webp", "image/gif"}:
+                known_gaps.append(f"不支持的图片 MIME 类型：{metadata.get('mime_type') or '未知'}")
 
-    def _apply_vision(self, parsed, units: list) -> tuple[list[Diagnostic], list[dict]]:
+            source_label = metadata.get("path", "未知来源")
+            object_text = " > ".join(image.heading_path[-2:]) or parsed.document_title
+            action = image.text or f"[图片证据：{source_label}]"
+            explanation = (
+                f"图片证据待人工复核：来源 {source_label}；"
+                "该单元只记录图片引用和可见内容，不把图片内容升级为业务规则。"
+            )
+            changes: list[dict[str, str]] = [
+                {"type": "图片证据绑定", "detail": "为每个图片引用生成独立证据单元。"}
+            ]
+            if heading is not None:
+                changes.append({"type": "章节证据", "detail": f"绑定标题证据 {heading.evidence_id}。"})
+            if caption is not None:
+                changes.append({"type": "图注绑定", "detail": f"绑定图注证据 {caption.evidence_id}。"})
+            if container is not None:
+                changes.append({"type": "容器绑定", "detail": f"绑定 HTML 容器证据 {container.evidence_id}。"})
+
+            unit = KnowledgeUnit(
+                unit_id=f"{parsed.source.source_id}-u{len(units) + 1:04d}",
+                business_question=f"{object_text} 中图片 {image.evidence_id} 的可见内容是什么？",
+                object=object_text,
+                conditions=[],
+                action_or_conclusion=action,
+                exceptions=[],
+                time_range="原文未单独标注时间或版本范围",
+                self_explanation=explanation,
+                evidence=bound_evidence,
+                changes=changes,
+                generation_mode="image_evidence",
+                review_status="blocked" if known_gaps else "pending_business_review",
+                risk_flags=detect_risk_flags(bound_evidence),
+                known_gaps=known_gaps,
+            )
+            unit.validation_findings = validate_knowledge_unit(unit)
+            if any(item["status"] == "error" for item in unit.validation_findings):
+                unit.review_status = "blocked"
+            units.append(unit)
+        return units
+
+    @staticmethod
+    def _mark_image_invalid(units: list, evidence: Evidence, reason: str) -> None:
+        for unit in units:
+            if not any(item.evidence_id == evidence.evidence_id for item in unit.evidence):
+                continue
+            if reason not in unit.known_gaps:
+                unit.known_gaps.append(reason)
+            unit.review_status = "blocked"
+            unit.validation_findings = validate_knowledge_unit(unit)
+
+    def _prepare_image_assets(self, parsed, units: list) -> tuple[dict[str, ImageRequest], list[Diagnostic]]:
+        requests: dict[str, ImageRequest] = {}
+        diagnostics: list[Diagnostic] = []
+        if parsed.source.source_path == "<memory>":
+            source_root = Path.cwd().resolve()
+        else:
+            source_root = Path(parsed.source.source_path).parent.resolve()
+        def invalid(evidence: Evidence, code: str, message: str) -> None:
+            diagnostics.append(Diagnostic(code=code, severity="error", message=message, location=evidence.evidence_id))
+            self._mark_image_invalid(units, evidence, message)
+
+        for evidence in (item for item in parsed.evidence if item.block_type == "image"):
+            metadata = evidence.metadata
+            if metadata.get("missing_src") or metadata.get("source_type") in {"", "unknown"}:
+                invalid(evidence, "image_src_missing", "HTML 图片缺少 src，无法定位图片证据。")
+                continue
+
+            source_type = metadata.get("source_type")
+            path = str(metadata.get("path", ""))
+            common = {
+                "path": path,
+                "alt": str(metadata.get("alt", "")),
+                "title": str(metadata.get("title", "")),
+                "caption": str(metadata.get("caption_evidence_id", "")),
+                "heading_path": evidence.heading_path,
+                "evidence_id": evidence.evidence_id,
+            }
+            if source_type == "remote":
+                requests[evidence.evidence_id] = ImageRequest(
+                    mime_type=str(metadata.get("mime_type", "")),
+                    data=b"",
+                    source_url=path,
+                    **common,
+                )
+                continue
+
+            if source_type == "data":
+                decoded = decode_data_uri(str(metadata.get("_data_uri", "")))
+                if decoded is None:
+                    invalid(evidence, "image_asset_missing", "data URI 图片无法解码。")
+                    continue
+                mime, data = decoded
+                if mime not in SUPPORTED_IMAGE_MIME_TYPES:
+                    invalid(evidence, "image_mime_unsupported", f"不支持的图片 MIME 类型：{mime}")
+                    continue
+                if len(data) > self.config.vision_max_image_bytes:
+                    invalid(evidence, "image_too_large", f"图片超过大小限制：{len(data)} > {self.config.vision_max_image_bytes}")
+                    continue
+                requests[evidence.evidence_id] = ImageRequest(mime_type=mime, data=data, **common)
+                continue
+
+            if source_type != "local":
+                invalid(evidence, "image_asset_missing", f"未知图片来源类型：{source_type}")
+                continue
+
+            resolved = Path(str(metadata.get("resolved_path", "")))
+            try:
+                resolved.relative_to(source_root)
+                inside_root = True
+            except (OSError, ValueError):
+                inside_root = False
+            location_kind = str(metadata.get("location_kind", "relative_path"))
+            if not inside_root and location_kind == "relative_path":
+                invalid(evidence, "image_path_escape", f"相对图片路径越界，拒绝读取：{resolved}")
+                continue
+            if not inside_root and location_kind in {"absolute_path", "file_uri"} and not self.config.allow_absolute_image_paths:
+                invalid(evidence, "image_path_escape", f"本地图片路径越界，拒绝读取：{resolved}")
+                continue
+            if not resolved.is_file():
+                invalid(evidence, "image_asset_missing", f"引用的本地图片不存在：{path or resolved}")
+                continue
+
+            mime = str(metadata.get("mime_type", ""))
+            if mime not in SUPPORTED_IMAGE_MIME_TYPES:
+                invalid(evidence, "image_mime_unsupported", f"不支持的图片 MIME 类型：{mime or '未知'}")
+                continue
+            try:
+                data = resolved.read_bytes()
+            except OSError as exc:
+                invalid(evidence, "image_asset_missing", f"本地图片读取失败：{exc}")
+                continue
+            if len(data) > self.config.vision_max_image_bytes:
+                invalid(evidence, "image_too_large", f"图片超过大小限制：{len(data)} > {self.config.vision_max_image_bytes}")
+                continue
+            requests[evidence.evidence_id] = ImageRequest(mime_type=mime, data=data, **common)
+
+        return requests, diagnostics
+
+    def _apply_vision(self, parsed, units: list, requests: dict[str, ImageRequest]) -> tuple[list[Diagnostic], list[dict]]:
         if not self._vision_enabled:
             return [], []
         diagnostics: list[Diagnostic] = []
         usage: list[dict] = []
-        source_root = Path(parsed.source.source_path).parent if parsed.source.source_path != "<memory>" else Path.cwd()
-        image_evidence = [item for item in parsed.evidence if item.block_type == "image"]
-        evidence_index = {item.evidence_id: item for item in parsed.evidence}
-        for evidence in image_evidence:
-            if evidence.metadata.get("source_type") == "remote":
-                diagnostics.append(Diagnostic(
-                    code="image_understanding_skipped",
-                    severity="warning",
-                    message="远程图片只保留引用，不主动抓取。",
-                    location=evidence.evidence_id,
-                ))
+        for evidence in (item for item in parsed.evidence if item.block_type == "image"):
+            request = requests.get(evidence.evidence_id)
+            if request is None:
                 continue
             try:
-                request = self._load_image_request(evidence, source_root)
-                if request is None:
-                    continue
                 description = self._vision_client.describe_image(request)
                 errors = validate_description(
                     description,
@@ -128,12 +236,20 @@ class SemanticReconstructor:
                         message="视觉输出未通过安全校验，已回退引用层：" + "；".join(errors),
                         location=evidence.evidence_id,
                     ))
-                    if has_conflict:
-                        for unit in units:
-                            if any(item.evidence_id == evidence.evidence_id for item in unit.evidence):
+                    for unit in units:
+                        if any(item.evidence_id == evidence.evidence_id for item in unit.evidence):
+                            if has_conflict:
                                 unit.review_status = "blocked"
-                                unit.known_gaps.append("视觉描述与正文证据存在冲突，需人工复核。")
+                                gap = "视觉描述与正文证据存在冲突，需人工复核。"
+                                if gap not in unit.known_gaps:
+                                    unit.known_gaps.append(gap)
+                            unit.changes.append({
+                                "type": "视觉描述未采纳",
+                                "detail": "视觉输出未通过安全校验，保留图片引用层并需人工复核。",
+                            })
+                            unit.validation_findings = validate_knowledge_unit(unit)
                     continue
+
                 vision_data = description.to_dict()
                 usage_entry = dict(vision_data.get("usage", {}))
                 usage_entry.update({
@@ -143,14 +259,25 @@ class SemanticReconstructor:
                 })
                 usage.append(usage_entry)
                 evidence.metadata["vision"] = vision_data
+                limitations = "；".join(description.limitations) or "无"
+                visible_text = description.visible_text or "无"
+                vision_explanation = (
+                    f"图片可见内容：{description.description}；可见文字：{visible_text}；"
+                    f"图表类型：{description.chart_type or '待确认'}；置信度：{description.confidence:.2f}；"
+                    f"限制说明：{limitations}。图片描述仅作为证据保留，不升级为业务规则。"
+                )
                 for unit in units:
                     if not any(item.evidence_id == evidence.evidence_id for item in unit.evidence):
                         continue
-                    unit.review_status = "pending_business_review"
+                    if unit.review_status != "blocked":
+                        unit.review_status = "pending_business_review"
+                    if unit.generation_mode == "image_evidence":
+                        unit.self_explanation = vision_explanation
                     unit.changes.append({
                         "type": "视觉描述生成",
                         "detail": "图片内容描述仅作为证据保留，需业务复核。",
                     })
+                    unit.validation_findings = validate_knowledge_unit(unit)
             except Exception as exc:
                 diagnostics.append(Diagnostic(
                     code="vision_provider_error",
@@ -158,6 +285,12 @@ class SemanticReconstructor:
                     message=f"视觉模型调用失败，已回退引用层：{exc}",
                     location=evidence.evidence_id,
                 ))
+                for unit in units:
+                    if any(item.evidence_id == evidence.evidence_id for item in unit.evidence):
+                        unit.changes.append({
+                            "type": "视觉描述回退",
+                            "detail": "视觉模型不可用或调用失败，图片内容需人工复核。",
+                        })
         return diagnostics, usage
 
     def _parse(self, text: str, source_id: str, source_path: str) -> ReconstructionResult:
@@ -172,7 +305,9 @@ class SemanticReconstructor:
         )
         parsed = parser.parse_text(text, source_id=source_id, source_path=source_path)
         units = RuleReconstructor(parsed).reconstruct()
-        vision_diagnostics, vision_usage = self._apply_vision(parsed, units)
+        units = self._append_image_units(parsed, units)
+        image_requests, image_diagnostics = self._prepare_image_assets(parsed, units)
+        vision_diagnostics, vision_usage = self._apply_vision(parsed, units, image_requests)
         usage: list[dict] = list(vision_usage)
 
         if self.config.mode in {"hybrid", "llm"}:
@@ -184,7 +319,7 @@ class SemanticReconstructor:
                 for evidence in unit.evidence:
                     evidence.raw_text = ""
 
-        diagnostics: list[Diagnostic] = list(vision_diagnostics)
+        diagnostics: list[Diagnostic] = [*image_diagnostics, *vision_diagnostics]
         for unit in units:
             if unit.review_status == "blocked":
                 diagnostics.append(Diagnostic(

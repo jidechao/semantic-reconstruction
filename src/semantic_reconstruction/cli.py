@@ -46,6 +46,7 @@ def build_parser() -> argparse.ArgumentParser:
     reconstruct.add_argument("--llm-batch-size", type=int, default=25)
     reconstruct.add_argument("--image-understanding", choices=["off", "auto", "required"], default="auto")
     reconstruct.add_argument("--include-image-references", action=argparse.BooleanOptionalAction, default=True)
+    reconstruct.add_argument("--absolute-image-paths", action=argparse.BooleanOptionalAction, default=True)
     reconstruct.add_argument("--include-chart-blocks", action=argparse.BooleanOptionalAction, default=True)
     reconstruct.add_argument("--vision-max-image-bytes", type=int, default=10 * 1024 * 1024)
     return parser
@@ -63,6 +64,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             image_understanding=args.image_understanding,
             include_image_references=args.include_image_references,
             include_chart_blocks=args.include_chart_blocks,
+            allow_absolute_image_paths=args.absolute_image_paths,
             vision_max_image_bytes=args.vision_max_image_bytes,
         )
         sdk = SemanticReconstructor(config)

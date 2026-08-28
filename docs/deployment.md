@@ -60,7 +60,8 @@ Select-String -Path dist\* -Pattern "sk-[A-Za-z0-9]+" -SimpleMatch:$false
 - 大规模处理建议先使用 `image_understanding="off"`，抽样启用视觉理解
 - `keep_raw_evidence=False` 可降低输出体积，但会削弱审计能力
 - `llm_batch_size` 越大，请求越少，但单次输出越大；支持范围 1-25
-- 视觉模型只处理本地图片和 data URI；远程图片不会被抓取
+- 视觉模型处理本地图片、`file:///`、data URI，并把 HTTP(S) URL 直接传给 provider；SDK 自身不下载远程图片
+- 企业环境可设置 `allow_absolute_image_paths=False`，限制图片必须位于 Markdown 目录内
 
 ## 入库建议
 
