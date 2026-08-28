@@ -16,6 +16,12 @@
 - 支持 API key 注入、密钥脱敏、可选多模态图片理解和私有 wheel 分发
 - 支持相对路径、本机绝对路径、`file:///`、data URI 和 HTTP(S) URL 图片证据，并为每张图片生成独立知识单元
 
+## 在 RAG 流程中的位置
+
+Semantic Reconstruction 位于数据清洗之后、Embedding 与向量入库之前，负责把原始 Markdown 重构为可审计、可独立理解的 `KnowledgeUnit`。下游分片、向量检索和 RAG 生成都基于这些语义单元，而不是重新按固定字符长度切分原文。
+
+![Semantic Reconstruction 在 RAG 流程中的位置](Semantic%20reconstruction.png)
+
 ## 安装
 
 在项目内创建虚拟环境：
