@@ -1,0 +1,35 @@
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+
+# Python caches and build artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+wheels/
+
+# Virtual environments
+.venv/
+venv/
+env/
+verify-venv/
+
+# Generated SDK outputs
+output/
+output-*/
+smoke-*/
+verify-output*/
+
+# Logs and temporary files
+logs/
+*.log
+*.tmp
+.DS_Store
+Thumbs.db
+dist-ci/

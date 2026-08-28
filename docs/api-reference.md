@@ -1,0 +1,108 @@
+# API 参考
+
+## `SemanticReconstructor`
+
+```python
+SemanticReconstructor(config=None, *, llm_client=None)
+```
+
+- `config`：`ReconstructionConfig`，缺省为离线 `rule` 模式
+- `llm_client`：可选 OpenAI-compatible client，用于 mock、代理或私有网关
+
+### `reconstruct_markdown`
+
+```python
+reconstruct_markdown(path, source_id=None) -> ReconstructionResult
+```
+
+读取一个 UTF-8 Markdown 文件并重构。`source_id` 缺省由文件名生成稳定 slug。
+
+### `reconstruct_text`
+
+```python
+reconstruct_text(text, source_id, source_path=None) -> ReconstructionResult
+```
+
+从内存文本重构。`source_path` 只用于审计展示，不会读取文件。
+
+### `reconstruct_files`
+
+```python
+reconstruct_files(paths) -> list[ReconstructionResult]
+```
+
+支持：
+
+- 单个文件路径
+- Markdown 目录
+- 路径可迭代对象
+
+目录遍历会跳过 `.venv`、`node_modules`、`__pycache__` 和 `.pytest_cache`。
+
+## `ReconstructionConfig`
+
+| 字段 | 类型 | 默认值 | 说明 |
+|---|---|---:|---|
+| `mode` | `rule/hybrid/llm` | `rule` | 运行模式 |
+| `api_key` | `str \| None` | `None` | 显式 key；也可来自 `DEEPSEEK_API_KEY` |
+| `base_url` | `str` | DeepSeek 地址 | OpenAI-compatible base URL |
+| `model` | `str` | `deepseek-v4-flash` | 模型名 |
+| `reasoning_effort` | `str` | `high` | reasoning effort |
+| `enable_thinking` | `bool` | `True` | DeepSeek thinking 开关 |
+| `timeout_seconds` | `float` | `120.0` | 单次请求超时 |
+| `max_retries` | `int` | `2` | 瞬时错误重试次数 |
+| `max_document_chars` | `int` | `2000000` | 单文档字符上限 |
+| `include_code_blocks` | `bool` | `True` | 代码块是否作为证据保留 |
+| `keep_raw_evidence` | `bool` | `True` | 是否保留原始 Markdown 片段 |
+| `llm_batch_size` | `int` | `25` | 每次模型请求最多处理的知识单元数 |
+| `extra_headers` | `dict` | `{}` | 传递给 provider 的额外 header |
+
+安全约束：
+
+- `repr(config)` 永远显示 `api_key=<redacted>`
+- SDK 不读取 `.env`
+- 只有 `hybrid/llm` 模式会访问网络
+
+## `ReconstructionResult`
+
+| 成员 | 说明 |
+|---|---|
+| `schema_version` | 当前为 `1.0` |
+| `source` | 来源 ID、路径、标题、行数、字符数和 SHA-256 |
+| `units` | `KnowledgeUnit` 列表 |
+| `diagnostics` | 文档级诊断 |
+| `llm_usage` | 模型调用摘要，不含 key 和请求原文 |
+| `summary` | 单元数与状态统计 |
+| `to_dict()` | 转为 JSON 兼容 dict |
+| `write_json(path)` | 写入 JSON |
+| `write_report(path)` | 写入中文 Markdown 报告 |
+
+## `KnowledgeUnit`
+
+包含：
+
+- `unit_id`
+- `business_question`
+- `object`
+- `conditions`
+- `action_or_conclusion`
+- `exceptions`
+- `time_range`
+- `self_explanation`
+- `evidence`
+- `changes`
+- `generation_mode`
+- `review_status`
+- `validation_findings`
+- `risk_flags`
+- `known_gaps`
+
+## 自定义 LLM client
+
+注入对象需要提供：
+
+```python
+client.chat.completions.create(**kwargs)
+```
+
+返回值需兼容 OpenAI SDK `ChatCompletion` 的 `choices[0].message.content` 和 `usage` 字段。
