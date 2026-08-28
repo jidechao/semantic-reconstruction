@@ -75,6 +75,41 @@ semantic-reconstruction reconstruct docs/policy.md --mode llm --out output-llm
 
 SDK Python API 不会隐式读取 `.env`。
 
+## 输入大小限制
+
+| 参数 | 默认值 | 作用范围 | 超限行为 |
+|---|---:|---|---|
+| `max_document_chars` | `2,000,000` | 单个 Markdown 文档，按 UTF-8 解码后的字符数计算，不按磁盘字节数计算 | 抛出 `DocumentTooLargeError`，整份文档停止处理 |
+| `vision_max_image_bytes` | `10,485,760`（10 MiB） | 单张本地图片或 data URI 图片的解码后字节数 | 输出 `image_too_large` 诊断，对应图片知识单元标记为 `blocked`，不中断其他内容 |
+
+说明：
+
+- `max_document_chars` 作用于每个 Markdown 文件；处理目录时，每个文件独立检查，限制值不是目录内所有文件的总和。
+- 字符数与磁盘大小不同：纯 ASCII 约 2 MB 对应 200 万字符，中文通常约 6 MB 对应 200 万字符。
+- HTTP(S) 图片不会被 SDK 下载，因此 `vision_max_image_bytes` 不适用于远程图片；该上限适用于本地图片和 data URI 图片。
+- 两个参数都必须配置为正整数。调大上限前，请确认机器内存、解析耗时、输出体积以及模型服务限制能够承载。
+
+Python API 配置：
+
+```python
+from semantic_reconstruction import ReconstructionConfig
+
+config = ReconstructionConfig(
+    mode="rule",
+    max_document_chars=2_000_000,
+    vision_max_image_bytes=10 * 1024 * 1024,
+)
+```
+
+CLI 配置：
+
+```powershell
+semantic-reconstruction reconstruct docs `
+  --max-document-chars 2000000 `
+  --vision-max-image-bytes 10485760 `
+  --out output
+```
+
 ## 三种模式
 
 | 模式 | 网络访问 | 适用场景 | 安全行为 |
