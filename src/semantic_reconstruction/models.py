@@ -4,10 +4,18 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 import hashlib
 import json
+import re
 from pathlib import Path
 from typing import Any
 
 from .exceptions import OutputValidationError
+
+_DATA_URI_REDACTION = re.compile(r"(data:[^;,\s]+;base64,)[A-Za-z0-9+/=]+", re.IGNORECASE)
+
+
+def _redact_data_uris(value: str) -> str:
+    return _DATA_URI_REDACTION.sub(r"\1<omitted>", value)
+
 
 
 @dataclass
@@ -32,6 +40,11 @@ class Evidence:
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         data["heading_path"] = list(self.heading_path)
+        data["metadata"] = {
+            key: value for key, value in data.get("metadata", {}).items()
+            if not key.startswith("_")
+        }
+        data["raw_text"] = _redact_data_uris(data["raw_text"])
         return data
 
 

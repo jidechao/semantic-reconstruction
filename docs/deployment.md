@@ -56,8 +56,11 @@ Select-String -Path dist\* -Pattern "sk-[A-Za-z0-9]+" -SimpleMatch:$false
 - 单文档默认上限 2,000,000 字符
 - 超大文档按 H1/H2 拆分
 - `include_code_blocks=False` 可降低输出体积
+- `include_image_references=False` 和 `include_chart_blocks=False` 可进一步降低输出体积
+- 大规模处理建议先使用 `image_understanding="off"`，抽样启用视觉理解
 - `keep_raw_evidence=False` 可降低输出体积，但会削弱审计能力
 - `llm_batch_size` 越大，请求越少，但单次输出越大；支持范围 1-25
+- 视觉模型只处理本地图片和 data URI；远程图片不会被抓取
 
 ## 入库建议
 

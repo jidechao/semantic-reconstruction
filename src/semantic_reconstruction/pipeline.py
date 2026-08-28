@@ -15,7 +15,8 @@ _TIME = re.compile(r"((?:19|20)\d{2}[-年/.]\d{1,2}(?:[-月/.]\d{1,2})?|V\d+(?:\
 _POLICY_MODAL = re.compile(r"(必须|不得|禁止|应当|应该|须|需要|可以|可由|负责|审批|执行)")
 _EXTERNAL_GAP = re.compile(r"(附件|另行规定|另行|以最新通知为准)")
 _PREVIOUS_REF = re.compile(r"(上述|以上|前文|如前所述)")
-_NEXT_REF = re.compile(r"(以下|如下|下图|下表|右侧|按照以下|参见以下)")
+_NEXT_REF = re.compile(r"(以下|如下|下图|下表|右侧|按照以下|参见以下|如图所示|见图|见图示)")
+_IMAGE_REF = re.compile(r"(如下图|下图|如图所示|见图|见图示)")
 _CANDIDATE_TYPES = {"paragraph", "list", "table_row", "blockquote"}
 _SENTENCE_SPLIT = re.compile(r"(?<=[。！？!?；;])\s*")
 
@@ -59,6 +60,24 @@ class RuleReconstructor:
                 return item
         return None
 
+    def _next_asset(self, position: int) -> Evidence | None:
+        for item in self.evidence[position + 1:]:
+            if item.block_type in {"image", "figure", "chart_code", "chart_svg"}:
+                return item
+        return None
+
+    def _caption_for(self, asset: Evidence) -> Evidence | None:
+        caption_id = asset.metadata.get("caption_evidence_id")
+        if caption_id:
+            return next((item for item in self.evidence if item.evidence_id == caption_id), None)
+        container_id = asset.metadata.get("container_evidence_id")
+        if container_id:
+            container = next((item for item in self.evidence if item.evidence_id == container_id), None)
+            caption_id = container.metadata.get("caption_evidence_id") if container else None
+            if caption_id:
+                return next((item for item in self.evidence if item.evidence_id == caption_id), None)
+        return None
+
     def _heading_path_evidence(self, block: Evidence) -> list[Evidence]:
         result: list[Evidence] = []
         for title in block.heading_path:
@@ -100,7 +119,38 @@ class RuleReconstructor:
                     context_evidence.append(previous)
                 else:
                     known_gaps.append("前文指代未包含在当前证据集中")
-            if _NEXT_REF.search(block.text):
+            if _IMAGE_REF.search(block.text):
+                asset = self._next_asset(position)
+                if asset:
+                    context_evidence.append(asset)
+                    caption = self._caption_for(asset)
+                    if caption:
+                        context_evidence.append(caption)
+                    container_id = asset.metadata.get("container_evidence_id")
+                    if container_id:
+                        container = next((item for item in self.evidence if item.evidence_id == container_id), None)
+                        if container:
+                            context_evidence.append(container)
+                    image_assets = [asset]
+                    for child_id in asset.metadata.get("asset_evidence_ids", []):
+                        child = next((item for item in self.evidence if item.evidence_id == child_id), None)
+                        if child and child.block_type == "image":
+                            image_assets.append(child)
+                            context_evidence.append(child)
+                    for image_asset in image_assets:
+                        metadata = image_asset.metadata
+                        if metadata.get("missing_src") or metadata.get("source_type") in {"", "unknown"}:
+                            known_gaps.append("HTML 图片缺少 src，无法定位图片证据。")
+                        if metadata.get("source_type") == "local" and not metadata.get("exists", False):
+                            known_gaps.append(f"引用的本地图片不存在：{metadata.get('path', '未知路径')}")
+                        if image_asset.block_type == "image" and not any([
+                            metadata.get("alt"), metadata.get("title"),
+                            metadata.get("caption_evidence_id"), metadata.get("vision"),
+                        ]):
+                            known_gaps.append("图片缺少 alt、图注或视觉描述，无法确认图片内容。")
+                else:
+                    known_gaps.append("正文引用图片，但后文没有可用的图片或图表证据。")
+            elif _NEXT_REF.search(block.text):
                 if next_block:
                     context_evidence.extend([next_block])
                     if next_block.block_type == "table_header":
@@ -171,6 +221,20 @@ class RuleReconstructor:
                 changes.append({"type": "例外绑定", "detail": "保留影响结论成立的例外表述。"})
             if time_sentences:
                 changes.append({"type": "时间版本绑定", "detail": "将时间或版本信息随结论携带。"})
+            asset_evidence = [item for item in evidence if item.block_type in {"image", "figure", "chart_code", "chart_svg"}]
+            if asset_evidence:
+                changes.append({
+                    "type": "图片图表绑定",
+                    "detail": "绑定图片/图表证据及其图注，不将视觉内容升级为业务规则。",
+                })
+                description_values = []
+                for asset in asset_evidence:
+                    if asset.metadata.get("alt") or asset.metadata.get("title") or asset.metadata.get("chart_type"):
+                        values = [asset.metadata.get("title", ""), asset.metadata.get("alt", ""), asset.metadata.get("chart_type", "")]
+                        description_values.append("；".join(value for value in values if value))
+                if description_values:
+                    explanation_parts.append("图片图表证据：" + "；".join(value for value in description_values if value))
+                    self_explanation = "；".join(explanation_parts)
             if block.block_type == "table_row":
                 changes.append({"type": "表头绑定", "detail": "表格行继承原表头上下文。"})
             if block.block_type == "code_example":

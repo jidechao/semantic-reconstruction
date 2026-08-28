@@ -1,12 +1,12 @@
 # 输出 Schema
 
-当前 `schema_version` 为 `1.0`。
+当前 `schema_version` 为 `1.1`。
 
 ## 顶层结构
 
 ```json
 {
-  "schema_version": "1.0",
+  "schema_version": "1.1",
   "source": {
     "source_id": "policy",
     "source_path": "docs/policy.md",
@@ -69,6 +69,31 @@
 }
 ```
 
+图片或图表 evidence 的 `block_type` 可能是：
+
+- `image`
+- `figure`
+- `image_caption`
+- `chart_code`
+- `chart_svg`
+
+示例 metadata：
+
+```json
+{
+  "asset_type": "image",
+  "source_type": "local",
+  "path": "assets/flow.png",
+  "exists": true,
+  "mime_type": "image/png",
+  "sha256": "...",
+  "alt": "流程图",
+  "title": "审批流程",
+  "caption_evidence_id": "policy-b0005",
+  "vision": {}
+}
+```
+
 ## review_status
 
 | 状态 | 含义 |
@@ -95,3 +120,10 @@
 12. 是否可以脱离原文理解
 
 每项 `status` 为 `pass`、`warning` 或 `error`。
+
+
+## 图片与图表 metadata
+
+引用层会输出路径、alt、title、图注、来源类型、本地文件哈希、Mermaid 节点和 SVG 文本。视觉理解成功时，`metadata.vision` 包含结构化描述、confidence 和 token 用量。
+
+输出中不包含图片二进制；data URI payload 会自动替换为 `<omitted>`。

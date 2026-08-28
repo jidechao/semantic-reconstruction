@@ -33,3 +33,5 @@ logs/
 .DS_Store
 Thumbs.db
 dist-ci/
+dist-v11/
+verify-v11-venv/

@@ -28,3 +28,11 @@ The SDK is designed to keep the following out of wheel and sdist artifacts:
 - generated output directories
 - private Markdown fixtures
 - virtual environments and caches
+
+## Image and Chart Safety
+
+- Remote images are recorded as references only and are never fetched.
+- Vision requests are limited to local images inside the Markdown source directory and data URIs.
+- Supported vision MIME types are PNG, JPEG, WebP, and GIF.
+- SVG scripts are never executed.
+- Image bytes and data URI payloads are not serialized into SDK output.

@@ -80,3 +80,19 @@ for result in results:
 ## 7. 下一步
 
 阅读 [API 参考](api-reference.md) 和 [输出 Schema](output-schema.md)。
+
+## 8. 启用图片理解
+
+默认只做离线引用层处理。配置多模态模型后，SDK 会自动理解本地图片和 data URI：
+
+```python
+config = ReconstructionConfig(
+    mode="rule",
+    image_understanding="auto",
+    vision_api_key="your-vision-api-key",
+    vision_base_url="https://api.example.com/v1",
+    vision_model="your-multimodal-model",
+)
+```
+
+远程图片只保留 URL 引用，不会被抓取。详见 [图片与图表处理](image-and-chart-processing.md)。

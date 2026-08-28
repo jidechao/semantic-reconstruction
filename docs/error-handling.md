@@ -28,6 +28,9 @@ SemanticReconstructionError
 - 模型表达越界：`hybrid` 回退规则结果，写入 LLM warning
 - 模型结构化越界：`llm` 输出 blocked，写入 LLM error
 - 执行主体不明确：输出 warning，等待业务复核
+- 图片缺失或图片引用无资产：输出 blocked
+- 视觉模型失败、低置信度、MIME 不支持、路径越界：回退引用层并输出 warning
+- 视觉描述与正文冲突：输出 blocked
 
 ## 示例
 
@@ -64,3 +67,12 @@ except SemanticReconstructionError:
 - 字段缺失
 - 条件、例外、数字或主体改变
 - 400、401、403、404 等不可恢复错误
+
+
+## 视觉处理诊断
+
+| code | 含义 |
+|---|---|
+| `image_understanding_skipped` | 远程图片只保留引用，不主动抓取 |
+| `vision_output_rejected` | 视觉输出未通过结构化、置信度或安全校验 |
+| `vision_provider_error` | 视觉模型调用失败，已回退引用层 |

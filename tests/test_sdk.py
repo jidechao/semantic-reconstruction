@@ -25,7 +25,7 @@ def make_result():
 
 def test_public_api_reconstructs_self_contained_unit():
     result = make_result()
-    assert result.schema_version == "1.0"
+    assert result.schema_version == "1.1"
     assert result.units
     assert all(len(unit.validation_findings) == 12 for unit in result.units)
     assert all(unit.evidence for unit in result.units)

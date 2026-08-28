@@ -6,14 +6,14 @@
 
 ## 核心能力
 
-- 解析标题、段落、列表、表格、引用、HTML 和 fenced code block
+- 解析标题、段落、列表、表格、引用、HTML、fenced code block、图片、figure、Mermaid 和 SVG
 - 自动绑定对象、条件、结论、例外、时间范围和证据位置
-- 识别“上述、以下、附件、除外、原则上、另行”等高风险依赖
+- 识别“上述、以下、下图、附件、除外、原则上、另行”等高风险依赖
 - 输出原文证据层与重构知识层
 - 内置 12 问验收，缺证据时阻断而不是臆造
 - 默认 `rule` 模式完全离线、确定性运行
 - 可选 `hybrid` / `llm` 模式基于 DeepSeek OpenAI-compatible API，并强制越界校验
-- 支持 API key 注入、密钥脱敏和私有 wheel 分发
+- 支持 API key 注入、密钥脱敏、可选多模态图片理解和私有 wheel 分发
 
 ## 安装
 
@@ -27,7 +27,7 @@ python -m venv .venv
 安装私有 wheel：
 
 ```powershell
-.\.venv\Scripts\python.exe -m pip install semantic_reconstruction-1.0.0-py3-none-any.whl
+.\.venv\Scripts\python.exe -m pip install semantic_reconstruction-1.1.0-py3-none-any.whl
 ```
 
 ## 5 分钟集成
@@ -84,6 +84,7 @@ SDK Python API 不会隐式读取 `.env`。
 - [输出 Schema](docs/output-schema.md)
 - [错误处理](docs/error-handling.md)
 - [部署指南](docs/deployment.md)
+- [图片与图表处理](docs/image-and-chart-processing.md)
 
 ## License
 
@@ -98,4 +99,3 @@ python -m venv .venv
 ```
 
 Private integration fixtures are stored under `tests/fixtures/markdown/` and are excluded from wheel and sdist artifacts.
-

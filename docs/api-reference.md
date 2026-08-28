@@ -3,11 +3,12 @@
 ## `SemanticReconstructor`
 
 ```python
-SemanticReconstructor(config=None, *, llm_client=None)
+SemanticReconstructor(config=None, *, llm_client=None, vision_client=None)
 ```
 
 - `config`：`ReconstructionConfig`，缺省为离线 `rule` 模式
 - `llm_client`：可选 OpenAI-compatible client，用于 mock、代理或私有网关
+- `vision_client`：可选视觉客户端，用于 mock、代理或多模态私有网关
 
 ### `reconstruct_markdown`
 
@@ -53,15 +54,26 @@ reconstruct_files(paths) -> list[ReconstructionResult]
 | `max_retries` | `int` | `2` | 瞬时错误重试次数 |
 | `max_document_chars` | `int` | `2000000` | 单文档字符上限 |
 | `include_code_blocks` | `bool` | `True` | 代码块是否作为证据保留 |
+| `include_image_references` | `bool` | `True` | 图片引用是否作为证据保留 |
+| `include_chart_blocks` | `bool` | `True` | Mermaid / SVG 是否作为图表证据保留 |
 | `keep_raw_evidence` | `bool` | `True` | 是否保留原始 Markdown 片段 |
 | `llm_batch_size` | `int` | `25` | 每次模型请求最多处理的知识单元数 |
 | `extra_headers` | `dict` | `{}` | 传递给 provider 的额外 header |
+| `image_understanding` | `off/auto/required` | `auto` | 图片理解模式 |
+| `vision_api_key` | `str \| None` | `None` | 视觉模型 key；也可来自 `VISION_API_KEY` |
+| `vision_base_url` | `str \| None` | `None` | 视觉模型 OpenAI-compatible base URL |
+| `vision_model` | `str \| None` | `None` | 多模态模型名 |
+| `vision_timeout_seconds` | `float` | `120.0` | 视觉请求超时 |
+| `vision_max_retries` | `int` | `1` | 视觉请求瞬时错误重试次数 |
+| `vision_max_image_bytes` | `int` | `10485760` | 单张图片大小上限 |
+| `vision_min_confidence` | `float` | `0.55` | 视觉描述最低置信度 |
 
 安全约束：
 
-- `repr(config)` 永远显示 `api_key=<redacted>`
+- `repr(config)` 永远显示 `api_key=<redacted>` 和 `vision_api_key=<redacted>`
 - SDK 不读取 `.env`
-- 只有 `hybrid/llm` 模式会访问网络
+- 只有 `hybrid/llm` 模式或启用视觉理解时才可能访问网络
+- 视觉理解只读取 Markdown 目录内本地图片和 data URI，不抓取远程图片
 
 ## `ReconstructionResult`
 
@@ -106,3 +118,25 @@ client.chat.completions.create(**kwargs)
 ```
 
 返回值需兼容 OpenAI SDK `ChatCompletion` 的 `choices[0].message.content` 和 `usage` 字段。
+
+
+## 自定义视觉 client
+
+注入对象需要实现：
+
+```python
+def describe_image(request: ImageRequest) -> ImageDescription: ...
+```
+
+内置 `OpenAICompatibleVisionClient` 使用 OpenAI-compatible `image_url` 消息格式。视觉输出必须包含：
+
+- `description`
+- `visible_text`
+- `chart_type`
+- `objects_or_nodes`
+- `relationships`
+- `colors_or_legends`
+- `limitations`
+- `confidence`
+
+详见 [图片与图表处理](image-and-chart-processing.md)。
